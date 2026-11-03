@@ -1,7 +1,6 @@
-# Binaries are shipped in release zip (see .github/workflows/release.yml or scripts/make-release.ps1)
-bin/
-*.zip
-*.7z
-install.log
 bin/
 dist/
+*.log
+tools/blockcheck-report.txt
+tools/candidate-*.txt
+install-test.log

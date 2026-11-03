@@ -1,0 +1,59 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch pinned zapret-win-bundle binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pin  = '4840909b1a26389cb72c46be5301d610b3768928'
+          $base = "https://raw.githubusercontent.com/bol-van/zapret-win-bundle/$pin/zapret-winws"
+          New-Item -ItemType Directory -Force -Path bin | Out-Null
+          foreach ($f in @('winws.exe','WinDivert.dll','WinDivert64.sys','cygwin1.dll')) {
+            Invoke-WebRequest -Uri "$base/$f" -OutFile "bin/$f" -Headers @{ 'User-Agent' = 'zapret-discord-build' }
+          }
+          Get-ChildItem bin | Select-Object Name, Length | Format-Table
+          # sanity: these are PE files, not LFS pointers
+          foreach ($f in Get-ChildItem bin -File) {
+            $head = [System.IO.File]::ReadAllBytes($f.FullName)[0..1]
+            if (-not ($head[0] -eq 0x4D -and $head[1] -eq 0x5A)) { throw "Not a PE file: $($f.Name)" }
+          }
+
+      - name: Stage package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = 'stage'
+          New-Item -ItemType Directory -Force -Path "$stage\bin","$stage\lists","$stage\presets","$stage\tools" | Out-Null
+          Copy-Item 'bin\*' "$stage\bin" -Force
+          Copy-Item 'lists\*' "$stage\lists" -Force
+          Copy-Item 'presets\*' "$stage\presets" -Force
+          Copy-Item 'tools\blockcheck.ps1','tools\strategies.json','tools\verify.ps1' "$stage\tools" -Force
+          Copy-Item 'install.bat','uninstall.bat','README.md','NOTICE.md','LICENSE' $stage -Force
+          Compress-Archive -Path "$stage\*" -DestinationPath 'zapret-discord-win64.zip' -CompressionLevel Optimal
+          $hash = (Get-FileHash 'zapret-discord-win64.zip' -Algorithm SHA256).Hash
+          "$hash  zapret-discord-win64.zip" | Set-Content 'SHA256.txt' -Encoding ascii
+          Get-Content 'SHA256.txt'
+          "size_mb=" + [math]::Round((Get-Item 'zapret-discord-win64.zip').Length / 1MB, 2)
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            zapret-discord-win64.zip
+            SHA256.txt
+          generate_release_notes: true

@@ -49,5 +49,18 @@ curl.exe -s -o NUL -m 10 -w "  discord.com     -> HTTP %%{http_code} (want 200)\
 
 echo.
 echo Done. Start Discord and check chat and voice.
+echo.
+if exist "%ROOT%\tools\verify.ps1" (
+  echo [verify] Running health check...
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\verify.ps1"
+  echo.
+)
+if not exist "%ROOT%\tools\blockcheck.ps1" goto :skipbc
+set /p RUNBC=Run automatic strategy test (blockcheck, takes a few minutes)? [y/N]: 
+if /i not "%RUNBC%"=="y" goto :skipbc
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\blockcheck.ps1"
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\verify.ps1"
+:skipbc
 pause
 endlocal
