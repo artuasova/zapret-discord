@@ -1,0 +1,14 @@
+[
+  { "name": "fake+multidisorder+md5sig (default)", "tls": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=1,midsld --dpi-desync-fooling=md5sig --dpi-desync-repeats=6" },
+  { "name": "fake+multidisorder+badseq",          "tls": "--dpi-desync=fake,multidisorder --dpi-desync-fooling=badseq --dpi-desync-split-pos=1,midsld" },
+  { "name": "multidisorder 1,midsld",            "tls": "--dpi-desync=multidisorder --dpi-desync-split-pos=1,midsld" },
+  { "name": "multisplit 1,midsld seqovl=1",      "tls": "--dpi-desync=multisplit --dpi-desync-split-pos=1,midsld --dpi-desync-split-seqovl=1" },
+  { "name": "fake+split2+md5sig repeats=3",      "tls": "--dpi-desync=fake,split2 --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1 --dpi-desync-repeats=3" },
+  { "name": "split2 pos=1",                      "tls": "--dpi-desync=split2 --dpi-desync-split-pos=1" },
+  { "name": "split2 midsld",                     "tls": "--dpi-desync=split2 --dpi-desync-split-pos=midsld" },
+  { "name": "disorder2 pos=1",                   "tls": "--dpi-desync=disorder2 --dpi-desync-split-pos=1" },
+  { "name": "fakedsplit pos=1",                  "tls": "--dpi-desync=fakedsplit --dpi-desync-split-pos=1" },
+  { "name": "fake md5sig ttl=1",                 "tls": "--dpi-desync=fake --dpi-desync-fooling=md5sig --dpi-desync-ttl=1" },
+  { "name": "fake+multidisorder md5sig midsld",  "tls": "--dpi-desync=fake,multidisorder --dpi-desync-split-pos=midsld --dpi-desync-fooling=md5sig --dpi-desync-repeats=6" },
+  { "name": "fake-tls-mod+multidisorder",        "tls": "--dpi-desync=fake,multidisorder --dpi-desync-fake-tls=! --dpi-desync-fake-tls-mod=rnd,rndsni --dpi-desync-fooling=md5sig --dpi-desync-split-pos=1,midsld --dpi-desync-repeats=6" }
+]

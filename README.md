@@ -34,6 +34,21 @@
 `uninstall.bat` от имени администратора -> удаляет службу и драйвер WinDivert.
 Если драйвер был занят, после перезагрузки удалить ещё раз.
 
+## Автоподбор стратегии (blockcheck)
+
+У провайдеров разные DPI, поэтому одна стратегия не универсальна. В комплекте автоподбор:
+
+```powershell
+# из консоли администратора
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1
+```
+
+Скрипт остановит службу, переберёт стратегии из `tools/strategies.json` (12 вариантов), проверит каждую
+реальными запросами к Discord: API, сайт, CDN, gateway + WebSocket-рукопожатие (OP_HELLO), включит лучшую
+и перезапустит службу. Результат — в `tools/blockcheck-report.txt`.
+
+Своя стратегия: добавить объект `{ "name": "...", "tls": "--dpi-desync=..." }` в `tools/strategies.json`.
+
 ## Проверка вручную
 
 ```powershell
@@ -60,7 +75,9 @@ install.bat            установка службы (нужен админ)
 uninstall.bat          удаление
 bin/                   winws.exe (zapret), WinDivert, cygwin1
 lists/discord-hosts.txt домены Discord, к которым применяется обход
-presets/               альтернативные стратегии
+presets/               готовые фиксированные стратегии
+tools/blockcheck.ps1   автоподбор стратегии под провайдера
+tools/strategies.json  список проверяемых стратегий
 ```
 
 ## Лицензии и происхождение
