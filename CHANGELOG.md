@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.2.0 - 2026-11-03
+
+Update and voice verification release (no installer - zip + install.bat stays).
+
+### Added
+- `tools/check-update.ps1`: compares local `VERSION` with the latest GitHub release (exit 0 = update, 1 = current,
+  2 = check failed). Tray menu item "Проверить обновления" opens the release page when a new version exists.
+- `tools/voice-test.ps1`: live voice verification (voice ports in service config, Discord UDP endpoints,
+  recent RTC_CONNECTED evidence). Exit codes: 0 ok, 1 broken, 2 not testable.
+- `blockcheck.ps1 -Voice`: after picking a strategy, validates live voice and falls back to the next
+  working strategy if voice is broken.
+- Start Menu shortcuts are not shipped; the zip/tray remains the entry point.
+
+### Changed
+- `install.bat` and `uninstall.bat` support `/quiet` (useful for automation).
+
 ## v1.1.0 - 2026-11-03
 
 Self-healing release: bypass now recovers itself when Discord breaks or the DPI updates.

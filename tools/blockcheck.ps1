@@ -1,8 +1,9 @@
 # blockcheck.ps1 - auto-select a working zapret strategy for Discord on this provider.
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1 [-Auto] [-Force]
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1 [-Auto] [-Force] [-Voice]
 param(
     [switch]$Auto,
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Voice
 )
 $ErrorActionPreference = 'Continue'
 
@@ -10,6 +11,7 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $winws = Join-Path $root 'bin\winws.exe'
 $hostlist = Join-Path $root 'lists\discord-hosts.txt'
 $strategiesFile = Join-Path $root 'tools\strategies.json'
+$voiceTest = Join-Path $root 'tools\voice-test.ps1'
 $logsDir = Join-Path $root 'tools\logs'
 $report = Join-Path $logsDir 'blockcheck-report.txt'
 $history = Join-Path $logsDir 'strategies-history.jsonl'
@@ -123,8 +125,34 @@ function Run-Candidate($cand) {
     return @{ score = $score; details = $details }
 }
 
+function Apply-Strategy($cand) {
+    sc.exe stop zapret-discord | Out-Null
+    Start-Sleep -Seconds 2
+    Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
+    $argsList = Build-Args $cand.Tls
+    $binPath = '"{0}" {1}' -f $winws, ($argsList -join ' ')
+    sc.exe config zapret-discord binPath= $binPath | Out-Null
+    sc.exe start zapret-discord | Out-Null
+    for ($try = 1; $try -le 5; $try++) {
+        Start-Sleep -Seconds 2
+        $svc = Get-Service zapret-discord -ErrorAction SilentlyContinue
+        if ($svc -and $svc.Status -eq 'Running') {
+            $v = Test-Http 'https://discord.com/api/v9/gateway'
+            if ($v.ok) { return $v }
+        }
+    }
+    return $null
+}
+
+function Invoke-VoiceCheck {
+    if (-not (Test-Path $voiceTest)) { return 2 }
+    $p = Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -Wait `
+        -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $voiceTest, '-Quiet'
+    return $p.ExitCode
+}
+
 try {
-    Log "blockcheck start (auto=$Auto)"
+    Log "blockcheck start (auto=$Auto voice=$Voice)"
     Log 'Stopping zapret-discord service for the test...'
     sc.exe stop zapret-discord | Out-Null
     Start-Sleep -Seconds 2
@@ -151,24 +179,35 @@ try {
     $applied = $false
     if ($best -and $best.Score -ge 4) {
         Log "BEST: $($best.Name) score=$($best.Score)" 'Green'
-        $argsList = Build-Args $best.Tls
-        $binPath = '"{0}" {1}' -f $winws, ($argsList -join ' ')
-        sc.exe config zapret-discord binPath= $binPath | Out-Null
-        sc.exe start zapret-discord | Out-Null
-        # wait until the service is really up before reporting success
-        $verdict = @{ code = 0 }
-        for ($try = 1; $try -le 5; $try++) {
-            Start-Sleep -Seconds 2
-            $svc = Get-Service zapret-discord -ErrorAction SilentlyContinue
-            if ($svc -and $svc.Status -eq 'Running') {
-                $verdict = Test-Http 'https://discord.com/api/v9/gateway'
-                if ($verdict.ok) { break }
+        $verdict = Apply-Strategy $best
+        if ($verdict) {
+            Log ("APPLIED: {0}, api_http={1}" -f $best.Name, $verdict.code) 'Green'
+            $applied = $true
+        }
+
+        # optional live voice validation: if Discord is in a voice channel, prefer a strategy that keeps it working
+        if ($applied -and $Voice) {
+            $vr = Invoke-VoiceCheck
+            Log "voice check exit=$vr (0=ok 1=broken 2=not testable)"
+            if ($vr -eq 1) {
+                $alts = $results | Where-Object { $_.Score -ge 4 -and $_.Index -ne $best.Index } |
+                    Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Index'; Ascending = $true } |
+                    Select-Object -First 2
+                foreach ($alt in $alts) {
+                    Log "voice broken - trying alternative: $($alt.Name)" 'Yellow'
+                    $v2 = Apply-Strategy $alt
+                    if ($v2) {
+                        $vr2 = Invoke-VoiceCheck
+                        Log "  voice check exit=$vr2"
+                        if ($vr2 -ne 1) { $best = $alt; Log "voice-compatible strategy: $($alt.Name)" 'Green'; break }
+                    }
+                }
             }
         }
-        Log ("APPLIED: {0}, api_http={1}" -f $best.Name, $verdict.code) 'Green'
-        $applied = $true
+    }
 
-        $entry = [pscustomobject]@{ at = (Get-Date -Format o); strategy = $best.Name; score = $best.Score; auto = [bool]$Auto }
+    if ($applied) {
+        $entry = [pscustomobject]@{ at = (Get-Date -Format o); strategy = $best.Name; score = $best.Score; auto = [bool]$Auto; voice = [bool]$Voice }
         $entry | ConvertTo-Json -Compress | Add-Content $history -Encoding utf8
         Set-Content -Path (Join-Path $logsDir 'last-strategy.json') -Value ($entry | ConvertTo-Json) -Encoding utf8
     } else {

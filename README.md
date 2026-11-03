@@ -22,10 +22,11 @@
 
 ## Установка
 
-1. Распакуй папку в путь **без пробелов и кириллицы**, например `C:\zapret-discord`.
-2. Правый клик на `install.bat` -> «Запустить от имени администратора».
-3. В конце установщик сам проверит `discord.com`: должно быть `HTTP 200`.
-4. Запусти Discord, проверь чат и голосовой канал.
+1. Скачай `zapret-discord-win64.zip` из [Releases](https://github.com/artuasova/zapret-discord/releases).
+2. Распакуй в путь **без пробелов и кириллицы**, например `C:\zapret-discord`.
+3. Правый клик на `install.bat` -> «Запустить от имени администратора».
+4. В конце установщик сам проверит `discord.com`: должно быть `HTTP 200`.
+5. Запусти Discord, проверь чат и голосовой канал.
 
 Служба ставится в автозапуск (`zapret-discord`), при падении перезапускается автоматически.
 
@@ -66,6 +67,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1
 
 Своя стратегия: добавить объект `{ "name": "...", "tls": "--dpi-desync=..." }` в `tools/strategies.json`.
 
+## Проверка голоса
+
+Голос проверяется отдельно, потому что живьём — только так честно:
+
+```powershell
+# зайди в голосовой канал Discord, скажи пару слов, затем:
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\voice-test.ps1
+```
+
+Скрипт смотрит: голосовые порты в конфиге службы, UDP-эндпоинты Discord и свежее `RTC_CONNECTED` в логах.
+Коды: `0` — голос работает, `1` — сломан, `2` — проверить нельзя (Discord не запущен / не в канале).
+
+Автоподбор с проверкой голоса: `tools\blockcheck.ps1 -Voice` (сначала подберёт стратегию, затем проверит
+голос и при необходимости возьмёт следующую рабочую стратегию).
+
+## Обновления
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-update.ps1
+```
+
+Коды: `0` — есть новая версия (печатает ссылку), `1` — стоит последняя, `2` — нет доступа к GitHub.
+В трее есть пункт «Проверить обновления».
+
 ## Проверка вручную
 
 ```powershell
@@ -94,10 +119,12 @@ VERSION                версия сборки
 bin/                   winws.exe (zapret), WinDivert, cygwin1
 lists/discord-hosts.txt домены Discord, к которым применяется обход
 presets/               готовые фиксированные стратегии
-tools/blockcheck.ps1   автоподбор стратегии под провайдера
+tools/blockcheck.ps1   автоподбор стратегии под провайдера (-Voice = с проверкой голоса)
 tools/watchdog.ps1     самовосстановление (задача каждые 5 минут)
 tools/tray.ps1         иконка в трее
 tools/verify.ps1       быстрая проверка состояния
+tools/voice-test.ps1   проверка голоса вживую
+tools/check-update.ps1 проверка новой версии на GitHub
 tools/collect-diagnostics.ps1  zip с диагностикой
 tools/strategies.json  список проверяемых стратегий
 tools/logs/            логи и отчёты

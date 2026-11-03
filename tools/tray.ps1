@@ -54,6 +54,8 @@ $itemBlock = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemBlock.Text = 'Blockcheck (автоподбор)'
 $itemDiag = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemDiag.Text = 'Диагностика (zip)'
+$itemUpdate = New-Object System.Windows.Forms.ToolStripMenuItem
+$itemUpdate.Text = 'Проверить обновления'
 $itemLogs = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemLogs.Text = 'Открыть логи'
 $itemExit = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -66,6 +68,7 @@ $itemExit.Text = 'Выход'
 [void]$menu.Items.Add($itemOff)
 [void]$menu.Items.Add($itemBlock)
 [void]$menu.Items.Add($itemDiag)
+[void]$menu.Items.Add($itemUpdate)
 [void]$menu.Items.Add($itemLogs)
 [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
 [void]$menu.Items.Add($itemExit)
@@ -135,6 +138,21 @@ $itemDiag.add_Click({
     Balloon 'Диагностика' 'Собираю zip в tools\logs, открою папку.'
 })
 $itemLogs.add_Click({ Start-Process explorer.exe (Join-Path $root 'tools\logs') })
+$itemUpdate.add_Click({
+    Tray-Log 'menu: check-update'
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'tools\check-update.ps1') 2>&1
+    $code = $LASTEXITCODE
+    if ($code -eq 0) {
+        $line = ($out | Where-Object { $_ -match 'Update available' } | Select-Object -First 1)
+        Balloon 'Есть обновление' "$line. Открываю страницу релиза."
+        Start-Process 'https://github.com/artuasova/zapret-discord/releases/latest'
+    } elseif ($code -eq 1) {
+        $line = ($out | Where-Object { $_ -match 'Up to date' } | Select-Object -First 1)
+        Balloon 'Обновлений нет' $line
+    } else {
+        Balloon 'Не удалось проверить' 'Нет доступа к GitHub API.' 'Warning'
+    }
+})
 $itemExit.add_Click({
     Tray-Log 'exit'
     $notify.Visible = $false

@@ -1,10 +1,12 @@
 @echo off
 setlocal
 title zapret: Discord only - uninstaller
+set "QUIET=0"
+if /i "%~1"=="/quiet" set "QUIET=1"
 net session >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Run this file as Administrator.
-  pause
+  if "%QUIET%"=="0" pause
   exit /b 1
 )
 
@@ -30,5 +32,5 @@ sc query windivert >nul 2>&1
 if not errorlevel 1 echo [WARN] Driver windivert still present. Reboot required.
 
 echo [5/5] Done. Discord bypass removed, normal internet untouched.
-pause
+if "%QUIET%"=="0" pause
 endlocal
