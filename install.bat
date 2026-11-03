@@ -50,6 +50,12 @@ curl.exe -s -o NUL -m 10 -w "  discord.com     -> HTTP %%{http_code} (want 200)\
 echo.
 echo Done. Start Discord and check chat and voice.
 echo.
+if exist "%ROOT%\tools\install-tasks.ps1" (
+  echo [tasks] Installing watchdog (5 min) and tray (logon)...
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\install-tasks.ps1"
+  echo.
+)
+if exist "%ROOT%\VERSION" ( for /f %%v in ('type "%ROOT%\VERSION"') do echo Installed version: %%v )
 if exist "%ROOT%\tools\verify.ps1" (
   echo [verify] Running health check...
   powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\tools\verify.ps1"

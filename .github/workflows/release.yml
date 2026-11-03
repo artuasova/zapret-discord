@@ -42,8 +42,8 @@ jobs:
           Copy-Item 'bin\*' "$stage\bin" -Force
           Copy-Item 'lists\*' "$stage\lists" -Force
           Copy-Item 'presets\*' "$stage\presets" -Force
-          Copy-Item 'tools\blockcheck.ps1','tools\strategies.json','tools\verify.ps1' "$stage\tools" -Force
-          Copy-Item 'install.bat','uninstall.bat','README.md','NOTICE.md','LICENSE' $stage -Force
+          Copy-Item 'tools\*.ps1','tools\*.json' "$stage\tools" -Force
+          Copy-Item 'install.bat','uninstall.bat','README.md','NOTICE.md','LICENSE','VERSION','CHANGELOG.md' $stage -Force
           Compress-Archive -Path "$stage\*" -DestinationPath 'zapret-discord-win64.zip' -CompressionLevel Optimal
           $hash = (Get-FileHash 'zapret-discord-win64.zip' -Algorithm SHA256).Hash
           "$hash  zapret-discord-win64.zip" | Set-Content 'SHA256.txt' -Encoding ascii

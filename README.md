@@ -31,8 +31,25 @@
 
 ## Удаление
 
-`uninstall.bat` от имени администратора -> удаляет службу и драйвер WinDivert.
+`uninstall.bat` от имени администратора -> снимает задачи планировщика, удаляет службу и драйвер WinDivert.
 Если драйвер был занят, после перезагрузки удалить ещё раз.
+
+## Самовосстановление и трей (v1.1)
+
+После установки добавляются две задачи планировщика:
+
+- **`zapret-discord-watchdog`** — каждые 5 минут проверяет `discord.com/api`.
+  - 1 сбой: просто отмечает.
+  - 2 сбоя подряд: перезапускает службу.
+  - 3 сбоя подряд: запускает auto-blockcheck, подбирает рабочую стратегию и перезапускает службу.
+  - Защита: не трогает ничего, если интернет идёт через VPN/tunnel (иначе тест бессмыслен), не чаще
+    одного автосвитча в час, не запускается в двух экземплярах. Всё пишет в `tools\logs\watchdog.log`.
+- **`zapret-discord-tray`** — иконка в трее при входе в систему: статус, «Включить/Выключить обход»,
+  «Проверить Discord», «Blockcheck», «Диагностика (zip)», «Открыть логи». Работает с правами админа,
+  поэтому переключение без UAC.
+
+Логи: `tools\logs\` (`watchdog.log`, `blockcheck-report.txt`, `strategies-history.jsonl`, `tray.log`).
+Один файл для issue: `powershell -File tools\collect-diagnostics.ps1` -> zip в `tools\logs\`.
 
 ## Автоподбор стратегии (blockcheck)
 
@@ -45,7 +62,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1
 
 Скрипт остановит службу, переберёт стратегии из `tools/strategies.json` (12 вариантов), проверит каждую
 реальными запросами к Discord: API, сайт, CDN, gateway + WebSocket-рукопожатие (OP_HELLO), включит лучшую
-и перезапустит службу. Результат — в `tools/blockcheck-report.txt`.
+и перезапустит службу. Результат — в `tools\logs\blockcheck-report.txt`.
 
 Своя стратегия: добавить объект `{ "name": "...", "tls": "--dpi-desync=..." }` в `tools/strategies.json`.
 
@@ -71,13 +88,19 @@ sc query zapret-discord                                                     # RU
 ## Состав
 
 ```
-install.bat            установка службы (нужен админ)
+install.bat            установка службы + задач планировщика (нужен админ)
 uninstall.bat          удаление
+VERSION                версия сборки
 bin/                   winws.exe (zapret), WinDivert, cygwin1
 lists/discord-hosts.txt домены Discord, к которым применяется обход
 presets/               готовые фиксированные стратегии
 tools/blockcheck.ps1   автоподбор стратегии под провайдера
+tools/watchdog.ps1     самовосстановление (задача каждые 5 минут)
+tools/tray.ps1         иконка в трее
+tools/verify.ps1       быстрая проверка состояния
+tools/collect-diagnostics.ps1  zip с диагностикой
 tools/strategies.json  список проверяемых стратегий
+tools/logs/            логи и отчёты
 ```
 
 ## Лицензии и происхождение

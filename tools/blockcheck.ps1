@@ -1,18 +1,61 @@
 # blockcheck.ps1 - auto-select a working zapret strategy for Discord on this provider.
-# Run as Administrator:  powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File tools\blockcheck.ps1 [-Auto] [-Force]
+param(
+    [switch]$Auto,
+    [switch]$Force
+)
 $ErrorActionPreference = 'Continue'
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $winws = Join-Path $root 'bin\winws.exe'
 $hostlist = Join-Path $root 'lists\discord-hosts.txt'
 $strategiesFile = Join-Path $root 'tools\strategies.json'
-$report = Join-Path $root 'tools\blockcheck-report.txt'
+$logsDir = Join-Path $root 'tools\logs'
+$report = Join-Path $logsDir 'blockcheck-report.txt'
+$history = Join-Path $logsDir 'strategies-history.jsonl'
+$lockFile = Join-Path $logsDir '.blockcheck.lock'
+
+New-Item -ItemType Directory -Force -Path $logsDir | Out-Null
+
+function Log([string]$msg, [string]$color = 'Gray') {
+    $line = '[' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '] ' + $msg
+    if (-not $Auto) { Write-Host $line -ForegroundColor $color }
+    Add-Content $report -Value $line -Encoding utf8
+}
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $admin) { Write-Host 'Run as Administrator' -ForegroundColor Red; exit 1 }
 foreach ($f in @($winws, $hostlist, $strategiesFile)) {
     if (-not (Test-Path $f)) { Write-Host "Missing: $f" -ForegroundColor Red; exit 1 }
 }
+
+# --- VPN / tunnel guard: testing through a tunnel gives false results ---
+$tunnelRegex = '(?i)happ|wintun|wireguard|sing-tun|sing_box|sing-box|tap-windows|openvpn|amnezia|outline|shadowsocks|v2ray|xray|\btun\b|\bvpn\b'
+function Get-VpnAdapter {
+    foreach ($r in (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue)) {
+        $a = Get-NetAdapter -InterfaceIndex $r.ifIndex -ErrorAction SilentlyContinue
+        if (-not $a -or $a.Status -ne 'Up') { continue }
+        if ("$($a.Name) $($a.InterfaceDescription)" -match $tunnelRegex) { return $a }
+    }
+    return $null
+}
+
+$vpnAdapter = Get-VpnAdapter
+if ($vpnAdapter -and -not $Force) {
+    "blockcheck aborted at $(Get-Date -Format o): VPN/tunnel is the default route ($($vpnAdapter.Name))" | Add-Content $report -Encoding utf8
+    Write-Host "VPN/tunnel is active ($($vpnAdapter.Name)). Disable it first, or use -Force." -ForegroundColor Yellow
+    exit 2
+}
+
+# --- lock: do not run two blockchecks at once ---
+if (Test-Path $lockFile) {
+    $age = (Get-Date) - (Get-Item $lockFile).LastWriteTime
+    if ($age.TotalMinutes -lt 40) {
+        "blockcheck aborted at $(Get-Date -Format o): another instance is running" | Add-Content $report -Encoding utf8
+        exit 3
+    }
+}
+Set-Content -Path $lockFile -Value (Get-Date -Format o) -Encoding ascii
 
 $wf = '--wf-tcp=443,2053,2083,2087,2096,8443 --wf-udp=50000-50099,19294-19344'
 $udpProfiles = @(
@@ -32,10 +75,10 @@ function Build-Args([string]$tls) {
 }
 
 function Test-Http([string]$url) {
-    $r = & curl.exe -sS -o NUL -m 8 -w '%{http_code}|%{size_download}' $url 2>$null
-    $code = 0; $size = 0
-    if ($r -match '^(\d+)\|(\d+)$') { $code = [int]$Matches[1]; $size = [int]$Matches[2] }
-    return @{ ok = ($code -in @(200, 301, 302, 403, 404) -and $size -ge 0 -and $code -ne 0); code = $code }
+    $r = & curl.exe -sS -o NUL -m 8 -w '%{http_code}' $url 2>$null
+    $code = 0
+    if ($r -match '^(\d+)$') { $code = [int]$Matches[1] }
+    return @{ ok = ($code -in @(200, 301, 302, 403, 404)); code = $code }
 }
 
 function Test-Ws {
@@ -58,71 +101,84 @@ function Run-Candidate($cand) {
     Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 400
     $argsList = Build-Args $cand.tls
-    $errFile = Join-Path $root 'tools\candidate-err.txt'
     $proc = Start-Process -FilePath $winws -ArgumentList $argsList -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput (Join-Path $root 'tools\candidate-out.txt') -RedirectStandardError $errFile
+        -RedirectStandardOutput (Join-Path $logsDir 'candidate-out.txt') -RedirectStandardError (Join-Path $logsDir 'candidate-err.txt')
     Start-Sleep -Seconds 2
     $proc.Refresh()
     if ($proc.HasExited) {
         return @{ score = 0; details = "winws exited ($($proc.ExitCode))" }
     }
-    $checks = @()
-    $checks += (Test-Http 'https://discord.com/api/v9/gateway')
-    $checks += (Test-Http 'https://discord.com/')
-    $checks += (Test-Http 'https://cdn.discordapp.com/')
-    $checks += (Test-Http 'https://gateway.discord.gg/')
+    $codes = @()
+    $ok = 0
+    foreach ($u in @('https://discord.com/api/v9/gateway', 'https://discord.com/', 'https://cdn.discordapp.com/', 'https://gateway.discord.gg/')) {
+        $c = Test-Http $u
+        $codes += $c.code
+        if ($c.ok) { $ok++ }
+    }
     $wsOk = Test-Ws
-    $score = ($checks | Where-Object { $_.ok } | Measure-Object).Count
+    $score = $ok
     if ($wsOk) { $score += 2 }
-    $details = ($checks | ForEach-Object { $_.code }) -join ','
-    $details += " ws=" + $(if ($wsOk) { 'ok' } else { 'fail' })
+    $details = ($codes -join ',') + ' ws=' + $(if ($wsOk) { 'ok' } else { 'fail' })
     Get-Process -Id $proc.Id -ErrorAction SilentlyContinue | Stop-Process -Force
     return @{ score = $score; details = $details }
 }
 
-# --- stop production service while testing ---
-Write-Host 'Stopping zapret-discord service for the test...' -ForegroundColor Yellow
-sc.exe stop zapret-discord | Out-Null
-Start-Sleep -Seconds 2
-Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
+try {
+    Log "blockcheck start (auto=$Auto)"
+    Log 'Stopping zapret-discord service for the test...'
+    sc.exe stop zapret-discord | Out-Null
+    Start-Sleep -Seconds 2
+    Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
 
-$strategies = Get-Content $strategiesFile -Raw | ConvertFrom-Json
-$results = @()
-"blockcheck start $(Get-Date -Format o)" | Set-Content $report -Encoding utf8
+    $strategies = Get-Content $strategiesFile -Raw | ConvertFrom-Json
+    $results = @()
 
-$i = 0
-foreach ($s in $strategies) {
-    $i++
-    Write-Host ("[{0}/{1}] {2}" -f $i, $strategies.Count, $s.name) -ForegroundColor Cyan
-    $res = Run-Candidate $s
-    $results += [pscustomobject]@{ Index = $i; Name = $s.name; Tls = $s.tls; Score = $res.score; Details = $res.details }
-    "{0} | score={1} | {2}" -f $s.name, $res.score, $res.details | Add-Content $report -Encoding utf8
-    Write-Host ("        score={0}  {1}" -f $res.score, $res.details) -ForegroundColor Gray
+    $i = 0
+    foreach ($s in $strategies) {
+        $i++
+        Log ("[{0}/{1}] {2}" -f $i, $strategies.Count, $s.name) 'Cyan'
+        $res = Run-Candidate $s
+        $results += [pscustomobject]@{ Index = $i; Name = $s.name; Tls = $s.tls; Score = $res.score; Details = $res.details }
+        Log ("    score={0}  {1}" -f $res.score, $res.details)
+    }
+
+    Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    $best = $results | Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Index'; Ascending = $true } | Select-Object -First 1
+    Log '=== SUMMARY ==='
+    foreach ($r in $results) { Log ("  {0,-38} score={1}" -f $r.Name, $r.Score) }
+
+    $applied = $false
+    if ($best -and $best.Score -ge 4) {
+        Log "BEST: $($best.Name) score=$($best.Score)" 'Green'
+        $argsList = Build-Args $best.Tls
+        $binPath = '"{0}" {1}' -f $winws, ($argsList -join ' ')
+        sc.exe config zapret-discord binPath= $binPath | Out-Null
+        sc.exe start zapret-discord | Out-Null
+        # wait until the service is really up before reporting success
+        $verdict = @{ code = 0 }
+        for ($try = 1; $try -le 5; $try++) {
+            Start-Sleep -Seconds 2
+            $svc = Get-Service zapret-discord -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -eq 'Running') {
+                $verdict = Test-Http 'https://discord.com/api/v9/gateway'
+                if ($verdict.ok) { break }
+            }
+        }
+        Log ("APPLIED: {0}, api_http={1}" -f $best.Name, $verdict.code) 'Green'
+        $applied = $true
+
+        $entry = [pscustomobject]@{ at = (Get-Date -Format o); strategy = $best.Name; score = $best.Score; auto = [bool]$Auto }
+        $entry | ConvertTo-Json -Compress | Add-Content $history -Encoding utf8
+        Set-Content -Path (Join-Path $logsDir 'last-strategy.json') -Value ($entry | ConvertTo-Json) -Encoding utf8
+    } else {
+        Log 'NOT APPLIED: no strategy scored >= 4' 'Red'
+        sc.exe start zapret-discord | Out-Null
+    }
+
+    if ($applied) { exit 0 } else { exit 4 }
 }
-
-Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
-
-$best = $results | Sort-Object @{ Expression = 'Score'; Descending = $true }, @{ Expression = 'Index'; Ascending = $true } | Select-Object -First 1
-"`n=== SUMMARY ===" | Add-Content $report -Encoding utf8
-$results | Format-Table -AutoSize | Out-String | Add-Content $report -Encoding utf8
-
-if ($best -and $best.Score -ge 4) {
-    "BEST: $($best.Name) score=$($best.Score)" | Add-Content $report -Encoding utf8
-    Write-Host "`nBest strategy: $($best.Name) (score $($best.Score))" -ForegroundColor Green
-
-    $argsList = Build-Args $best.Tls
-    $binPath = '"{0}" {1}' -f $winws, ($argsList -join ' ')
-    sc.exe config zapret-discord binPath= $binPath | Out-Null
-    sc.exe start zapret-discord | Out-Null
-    Start-Sleep -Seconds 3
-    $verdict = Test-Http 'https://discord.com/api/v9/gateway'
-    Write-Host ("Service restarted with best strategy. discord api HTTP {0}" -f $verdict.code) -ForegroundColor Green
-    "APPLIED: $($best.Name), api_http=$($verdict.code)" | Add-Content $report -Encoding utf8
-} else {
-    Write-Host "`nNo strategy passed enough checks. Keeping the existing service config." -ForegroundColor Red
-    "NOT APPLIED: no strategy scored >= 4" | Add-Content $report -Encoding utf8
-    sc.exe start zapret-discord | Out-Null
+finally {
+    Get-Process winws* -ErrorAction SilentlyContinue | Stop-Process -Force
+    Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 }
-
-Write-Host "`nReport: $report" -ForegroundColor Yellow
-Write-Host 'Done.'
